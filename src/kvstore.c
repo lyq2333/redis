@@ -187,8 +187,8 @@ static void freeDictIfNeeded(kvstore *kvs, int didx) {
         kvstoreDictIsRehashingPaused(kvs, didx))
         return;
     dict *d = kvstoreGetDict(kvs, didx);
-    if (dictIsRehashing(d) && d->type->rehashingCompleted) 
-        d->type->rehashingCompleted(d);
+    // if (dictIsRehashing(d) && d->type->rehashingCompleted) 
+    //     d->type->rehashingCompleted(d);
     dictRelease(d);
     kvs->dicts[didx] = NULL;
     kvs->allocated_dicts--;
@@ -868,7 +868,7 @@ int kvstoreDictDelete(kvstore *kvs, int didx, const void *key) {
     }
     return ret;
 }
-
+#define REDIS_TEST
 #ifdef REDIS_TEST
 #include <stdio.h>
 #include "testhelp.h"
@@ -920,8 +920,50 @@ int kvstoreTest(int argc, char **argv, int flags) {
 
     int didx = 0;
     int curr_slot = 0;
+    dictEntry **plink;
+    int table;
     kvstore *kvs1 = kvstoreCreate(&KvstoreDictTestType, 0, KVSTORE_ALLOCATE_DICTS_ON_DEMAND);
     kvstore *kvs2 = kvstoreCreate(&KvstoreDictTestType, 0, KVSTORE_ALLOCATE_DICTS_ON_DEMAND | KVSTORE_FREE_EMPTY_DICTS);
+
+    TEST("Add 16 keys") {
+        for (i = 0; i < 16; i++) {
+            de = kvstoreDictAddRaw(kvs2, didx, stringFromInt(i), NULL);
+            assert(de != NULL);
+        }
+        assert(kvstoreDictSize(kvs2, didx) == 16);
+        assert(kvstoreSize(kvs2) == 16);
+    }
+
+     TEST("kvstoreIterator case 2: removing all keys will delete the empty dict and rehash") {
+        kvs_it = kvstoreIteratorInit(kvs2);
+        while(kvstoreDictSize(kvs2, didx) > 1) {
+            de = kvstoreIteratorNext(kvs_it);
+            assert(de != NULL);
+            curr_slot = kvstoreIteratorGetCurrentDictIndex(kvs_it);
+            key = dictGetKey(de);
+            assert(kvstoreDictDelete(kvs2, curr_slot, key) == DICT_OK);
+        }
+        de = kvstoreIteratorNext(kvs_it);
+        key = dictGetKey(de);
+        kvstoreIteratorRelease(kvs_it);
+        printf("rehashing len1:%ld\n", listLength(kvs2->rehashing));
+        printf("rehash:%d\n", dictIsRehashing(kvstoreGetDict(kvs2, didx)));
+
+        dictPauseRehashing(kvstoreGetDict(kvs2, didx));
+        de = kvstoreDictTwoPhaseUnlinkFind(kvs2, curr_slot, key, &plink, &table);
+        assert(de != NULL);
+        printf("rehashing len2:%ld\n", listLength(kvs2->rehashing));
+        dictResumeRehashing(kvstoreGetDict(kvs2, didx));
+        kvstoreDictTwoPhaseUnlinkFree(kvs2, curr_slot, de, plink, table);
+        printf("rehashing len3:%ld\n", listLength(kvs2->rehashing));
+        assert(kvstoreGetDict(kvs2, didx) == NULL);
+        kvstoreIncrementallyRehash(kvs2, UINT64_MAX);
+
+        dict *d = kvstoreGetDict(kvs2, didx);
+        assert(d == NULL);
+        assert(kvstoreDictSize(kvs2, didx) == 0);
+        assert(kvstoreSize(kvs2) == 0);
+    }
 
     TEST("Add 16 keys") {
         for (i = 0; i < 16; i++) {

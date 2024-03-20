@@ -371,6 +371,7 @@ static int dictCheckRehashingCompleted(dict *d) {
  * will visit at max N*10 empty buckets in total, otherwise the amount of
  * work it does would be unbound and the function may block for a long time. */
 int dictRehash(dict *d, int n) {
+    printf("dict:%ld\n", (int64_t)d);
     int empty_visits = n*10; /* Max number of empty buckets to visit. */
     unsigned long s0 = DICTHT_SIZE(d->ht_size_exp[0]);
     unsigned long s1 = DICTHT_SIZE(d->ht_size_exp[1]);
